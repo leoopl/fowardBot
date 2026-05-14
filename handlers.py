@@ -111,7 +111,7 @@ def register(app: Client, store: "ConfigStore") -> None:
 
     # --- Handler A: command dispatcher (group 0) ---
     @app.on_message(
-        filters.outgoing & filters.chat("me") & command_prefix_filter,
+        filters.chat("me") & command_prefix_filter,
         group=0,
     )
     async def on_command(client, message):
@@ -127,7 +127,6 @@ def register(app: Client, store: "ConfigStore") -> None:
     # --- Handler B: forwarder (group 1) ---
     @app.on_message(
         filters.incoming
-        & ~filters.edited
         & ~filters.service
         & ~filters.chat("me")
         & watchlist_filter
