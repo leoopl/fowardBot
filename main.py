@@ -25,6 +25,26 @@ SESSION_FILE = pathlib.Path("/sessions/userbot.session")
 HB_PATH = pathlib.Path("/sessions/heartbeat")
 CONFIG_PATH = "/app/config/config.json"
 
+
+def _parse_control_chat(raw: str) -> "int | str":
+    """Resolve CONTROL_CHAT into a value Pyrogram accepts.
+
+    "me" (or empty) → Saved Messages. A numeric string → int chat id
+    (e.g. a private channel like -1001234567890). Anything else → the raw
+    string (a @username), with any leading '@' kept as-is for Pyrogram.
+    """
+    raw = (raw or "me").strip()
+    if raw.lower() in ("me", "self"):
+        return "me"
+    try:
+        return int(raw)
+    except ValueError:
+        return raw
+
+
+CONTROL_CHAT = _parse_control_chat(os.getenv("CONTROL_CHAT", "me"))
+log.info("control chat: %s", CONTROL_CHAT)
+
 # --- Session pre-flight ---
 if not SESSION_FILE.exists() and not sys.stdin.isatty():
     log.error(
@@ -45,7 +65,7 @@ app = Client(
     workdir="/sessions",
 )
 
-handlers.register(app, store)
+handlers.register(app, store, CONTROL_CHAT)
 
 
 # --- Heartbeat ---

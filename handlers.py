@@ -41,13 +41,13 @@ class ProcessingSeen:
 processing_seen = ProcessingSeen()
 
 
-async def safe_forward(message) -> None:
+async def safe_forward(message, dest) -> None:
     cid = message.chat.id
     uname = (message.chat.username or "").lower()
     if cid in forwards_blocked or (uname and uname in forwards_blocked):
         return
     try:
-        await message.forward("me")
+        await message.forward(dest)
         return
     except FloodWait as e:
         wait = getattr(e, "value", getattr(e, "x", 5))
@@ -71,7 +71,7 @@ async def safe_forward(message) -> None:
         return
     # FloodWait retry — wrapped so a second exception doesn't propagate
     try:
-        await message.forward("me")
+        await message.forward(dest)
     except Exception:
         log.exception(
             "forward retry failed (chat=%s msg=%s) — giving up",
@@ -80,7 +80,7 @@ async def safe_forward(message) -> None:
         )
 
 
-def register(app: Client, store: "ConfigStore") -> None:
+def register(app: Client, store: "ConfigStore", control_chat: "int | str" = "me") -> None:
     # --- watchlist filter (closes over store) ---
     async def _watchlist(_, __, message):
         chat = message.chat
@@ -111,7 +111,7 @@ def register(app: Client, store: "ConfigStore") -> None:
 
     # --- Handler A: command dispatcher (group 0) ---
     @app.on_message(
-        filters.chat("me") & command_prefix_filter,
+        filters.chat(control_chat) & command_prefix_filter,
         group=0,
     )
     async def on_command(client, message):
@@ -128,7 +128,7 @@ def register(app: Client, store: "ConfigStore") -> None:
     @app.on_message(
         filters.incoming
         & ~filters.service
-        & ~filters.chat("me")
+        & ~filters.chat(control_chat)
         & watchlist_filter
         & (filters.text | filters.caption),
         group=1,
@@ -141,10 +141,21 @@ def register(app: Client, store: "ConfigStore") -> None:
         key = (message.chat.id, message.id)
         if processing_seen.check_and_add(key):
             return
-        await safe_forward(message)
+        await safe_forward(message, control_chat)
         log.info(
             "forwarded chat=%s msg=%s via keyword=%r", message.chat.id, message.id, hit
         )
+
+    # --- Handler C: /chatid helper (group 2) ---
+    # Works in ANY chat. Reply with the chat's numeric id so you can discover
+    # the id of a private channel/group to put in CONTROL_CHAT. Restricted to
+    # your own (outgoing) messages so nobody else can trigger it.
+    @app.on_message(
+        filters.outgoing & filters.regex(r"^/chatid(@\w+)?\s*$"),
+        group=2,
+    )
+    async def on_chatid(client, message):
+        await message.reply(f"chat id: `{message.chat.id}`")
 
 
 async def _dispatch(name: str, arg: str, message, store: "ConfigStore") -> None:

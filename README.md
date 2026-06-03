@@ -147,11 +147,24 @@ API_HASH=0123456789abcdef0123456789abcdef
 LOG_LEVEL=INFO
 ```
 
-| Variable    | Description                                              |
-| ----------- | -------------------------------------------------------- |
-| `API_ID`    | Integer from my.telegram.org                             |
-| `API_HASH`  | 32-char hex string from my.telegram.org                  |
-| `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` (default: `INFO`) |
+| Variable       | Description                                                                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------------------ |
+| `API_ID`       | Integer from my.telegram.org                                                                                  |
+| `API_HASH`     | 32-char hex string from my.telegram.org                                                                       |
+| `LOG_LEVEL`    | `DEBUG`, `INFO`, `WARNING`, or `ERROR` (default: `INFO`)                                                      |
+| `CONTROL_CHAT` | Where commands are read and forwards are sent. `me` = Saved Messages (default), or a numeric chat id. See below. |
+
+### Using a dedicated chat instead of Saved Messages
+
+By default the bot reads commands from and forwards matches to your **Saved Messages** (`CONTROL_CHAT=me`). To keep the bot out of your Saved Messages, point it at a private channel or group you own:
+
+1. Create a **private channel** (or group) in Telegram with your account.
+2. With the bot already running, send `/chatid` in that channel. The bot replies with the numeric id (e.g. `-1001234567890`).
+3. Set `CONTROL_CHAT=-1001234567890` in `.env` and restart: `docker compose up -d`.
+
+From then on, send all `/add_keyword`, `/add_chat`, etc. commands in that channel, and matches are forwarded there too. The `/chatid` command works in any chat at any time.
+
+> The bot must be able to post in the target chat — automatic if you created it (you're the owner/admin).
 
 ### 3. Build the Docker image
 

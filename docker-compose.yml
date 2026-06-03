@@ -8,6 +8,7 @@ services:
       API_ID: ${API_ID}
       API_HASH: ${API_HASH}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CONTROL_CHAT: ${CONTROL_CHAT:-me}
     volumes:
       - session:/sessions
       - config:/app/config
