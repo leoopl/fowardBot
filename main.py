@@ -4,8 +4,7 @@ import os
 import pathlib
 import sys
 
-import pyrogram
-from pyrogram import Client
+from telethon import TelegramClient
 
 import handlers
 from config_store import ConfigStore
@@ -19,19 +18,26 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S%z",
 )
 log = logging.getLogger("forwardbot")
+# Telethon is chatty at INFO/DEBUG; keep its own logger quiet unless we asked
+# for DEBUG, so our own forwardbot lines stay readable.
+if level != "DEBUG":
+    logging.getLogger("telethon").setLevel(logging.WARNING)
 
 # --- Constants ---
-SESSION_FILE = pathlib.Path("/sessions/userbot.session")
+# New Telethon session (its file format differs from the old Pyrogram one, so we
+# use a distinct name; a fresh login is required once).
+SESSION = "/sessions/userbot_tl"
+SESSION_FILE = pathlib.Path(SESSION + ".session")
 HB_PATH = pathlib.Path("/sessions/heartbeat")
 CONFIG_PATH = "/app/config/config.json"
 
 
 def _parse_control_chat(raw: str) -> "int | str":
-    """Resolve CONTROL_CHAT into a value Pyrogram accepts.
+    """Resolve CONTROL_CHAT into a value Telethon accepts as an entity.
 
-    "me" (or empty) → Saved Messages. A numeric string → int chat id
+    "me"/"self" (or empty) → Saved Messages. A numeric string → int chat id
     (e.g. a private channel like -1001234567890). Anything else → the raw
-    string (a @username), with any leading '@' kept as-is for Pyrogram.
+    string (a @username).
     """
     raw = (raw or "me").strip()
     if raw.lower() in ("me", "self"):
@@ -58,14 +64,11 @@ if not SESSION_FILE.exists() and not sys.stdin.isatty():
 store = ConfigStore(CONFIG_PATH)
 store.load()
 
-app = Client(
-    name="userbot",
-    api_id=int(os.environ["API_ID"]),
-    api_hash=os.environ["API_HASH"],
-    workdir="/sessions",
+client = TelegramClient(
+    SESSION,
+    int(os.environ["API_ID"]),
+    os.environ["API_HASH"],
 )
-
-handlers.register(app, store, CONTROL_CHAT)
 
 
 # --- Heartbeat ---
@@ -73,18 +76,26 @@ async def heartbeat_loop() -> None:
     while True:
         HB_PATH.touch()
         log.debug(
-            "heartbeat: processing_seen=%d forwards_blocked=%d",
+            "heartbeat: processing_seen=%d forwards_blocked=%d watched=%d",
             len(handlers.processing_seen),
             len(handlers.forwards_blocked),
+            len(handlers.watched_ids),
         )
         await asyncio.sleep(60)
 
 
 async def amain() -> None:
     HB_PATH.touch()  # materialise immediately so healthcheck has a file at t=0
-    async with app:
-        asyncio.create_task(heartbeat_loop())
-        await pyrogram.idle()
+    await client.start()  # interactive auth on first run (phone + code + 2FA)
+    await handlers.warmup(client, store, CONTROL_CHAT)
+    handlers.register(client, store, CONTROL_CHAT)
+    asyncio.create_task(heartbeat_loop())
+    # Telegram doesn't reliably push real-time updates for these channels to a
+    # userbot session, so poll their history as the reliable delivery path.
+    poll_interval = int(os.getenv("POLL_INTERVAL", "45"))
+    asyncio.create_task(handlers.poll_loop(client, store, CONTROL_CHAT, poll_interval))
+    log.info("up — forwarding watched keywords to control chat (poll every %ss)", poll_interval)
+    await client.run_until_disconnected()
 
 
-app.run(amain())
+client.loop.run_until_complete(amain())

@@ -9,6 +9,8 @@ services:
       API_HASH: ${API_HASH}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       CONTROL_CHAT: ${CONTROL_CHAT:-me}
+      POLL_INTERVAL: ${POLL_INTERVAL:-45}
+      DIAG: ${DIAG:-}
     volumes:
       - session:/sessions
       - config:/app/config
