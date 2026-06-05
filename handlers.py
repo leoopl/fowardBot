@@ -2,6 +2,9 @@ import asyncio
 import logging
 import os
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
@@ -28,6 +31,7 @@ watched_ids: set[int] = set()               # resolved marked ids of every watch
 _id_by_username: dict[str, int] = {}        # username(lower) -> marked id (for removal)
 control_id: "int | None" = None             # resolved marked id of the control chat
 _last_seen_id: dict[int, int] = {}          # marked chat id -> highest message id handled (poller)
+_notify_token: str = ""                      # BotFather token; empty disables notifications
 
 KNOWN = {
     "add_keyword",
@@ -36,7 +40,35 @@ KNOWN = {
     "remove_chat",
     "list_keywords",
     "list_chats",
+    "help",
+    "start",
 }
+
+HELP_TEXT = (
+    "📋 fowardBot — commands\n"
+    "\n"
+    "🔑 KEYWORDS (whole-word, case-insensitive)\n"
+    "/add_keyword <phrase> — watch a keyword/phrase.\n"
+    "   Add several at once: one per line.\n"
+    "/remove_keyword <phrase> — stop watching it (one per line for several).\n"
+    "/list_keywords — show all keywords.\n"
+    "\n"
+    "📡 WATCHED CHATS\n"
+    "/add_chat <id or @username> — watch a chat/channel.\n"
+    "   Add several: separate with spaces, commas, or newlines.\n"
+    "/remove_chat <id or @username> — stop watching (several supported).\n"
+    "/list_chats — show watched chats (⚠️ = forwarding restricted).\n"
+    "\n"
+    "🛠 UTILITY\n"
+    "/chatid — reply with the current chat's numeric id.\n"
+    "/help — show this message.\n"
+    "\n"
+    "ℹ️ NOTES\n"
+    "• Matching posts are forwarded here automatically (within the poll interval).\n"
+    "• You must be a member of a chat for it to be watched.\n"
+    "• Multi-word phrases keep their spaces, e.g. \"rio de janeiro\".\n"
+    "• Tip: channel IDs are negative (e.g. -1001234567890)."
+)
 
 
 class ProcessingSeen:
@@ -66,6 +98,47 @@ def _is_forwards_restricted(exc: Exception) -> bool:
         return True
     blob = f"{type(exc).__name__} {exc}".upper()
     return "FORWARDS_RESTRICTED" in blob or "CHAT_FORWARDS_RESTRICTED" in blob
+
+
+def set_notify_token(token: str) -> None:
+    """Enable bot-ping notifications (empty token = disabled)."""
+    global _notify_token
+    _notify_token = (token or "").strip()
+
+
+def _ping_text(hit: str, payload: str) -> str:
+    snippet = " ".join(payload.split())[:140]
+    return f"🔔 {hit} — {snippet}" if snippet else f"🔔 {hit}"
+
+
+async def notify(text: str) -> None:
+    """Post `text` to the control chat via a BotFather bot so YOU get a push.
+
+    A userbot's own forwards never notify the account that sent them, so a
+    separate bot (admin in the control chat) sends this alert. No-op unless
+    NOTIFY_BOT_TOKEN is set and the control chat resolved to an id a bot can
+    post to (a channel/group, not 'me').
+    """
+    if not _notify_token or control_id is None:
+        return
+    try:
+        await asyncio.to_thread(_notify_sync, text)
+    except Exception as e:
+        log.warning("notify failed (%s) — check NOTIFY_BOT_TOKEN and that the bot is admin", e)
+
+
+def _notify_sync(text: str) -> None:
+    url = f"https://api.telegram.org/bot{_notify_token}/sendMessage"
+    data = urllib.parse.urlencode(
+        {"chat_id": control_id, "text": text, "disable_web_page_preview": "true"}
+    ).encode()
+    req = urllib.request.Request(url, data=data, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")[:200]
+        raise RuntimeError(f"Bot API {e.code}: {body}") from None
 
 
 async def safe_forward(message, dest) -> None:
@@ -218,6 +291,7 @@ async def _poll_once(client: TelegramClient, store: "ConfigStore", control_chat)
                 continue
             await safe_forward(m, control_chat)
             log.info("forwarded (poll) chat=%s msg=%s via keyword=%r", cid, m.id, hit)
+            await notify(_ping_text(hit, payload))
         _last_seen_id[cid] = new_max
 
 
@@ -258,6 +332,7 @@ def register(client: TelegramClient, store: "ConfigStore", control_chat) -> None
             return
         await safe_forward(event.message, control_chat)
         log.info("forwarded chat=%s msg=%s via keyword=%r", cid, event.id, hit)
+        await notify(_ping_text(hit, payload))
 
     # --- /chatid helper: works in ANY chat, only your own (outgoing) messages ---
     @client.on(events.NewMessage(outgoing=True, pattern=r"^/chatid(@\w+)?\s*$"))
@@ -282,6 +357,10 @@ def register(client: TelegramClient, store: "ConfigStore", control_chat) -> None
 
 
 async def _dispatch(name: str, arg: str, event, store: "ConfigStore", client: TelegramClient) -> None:
+    if name in ("help", "start"):
+        await event.reply(HELP_TEXT)
+        return
+
     if name == "add_keyword":
         items = _split_keywords(arg)
         if not items:

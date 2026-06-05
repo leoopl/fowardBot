@@ -89,6 +89,9 @@ async def amain() -> None:
     await client.start()  # interactive auth on first run (phone + code + 2FA)
     await handlers.warmup(client, store, CONTROL_CHAT)
     handlers.register(client, store, CONTROL_CHAT)
+    handlers.set_notify_token(os.getenv("NOTIFY_BOT_TOKEN", ""))
+    if os.getenv("NOTIFY_BOT_TOKEN", "").strip():
+        log.info("bot-ping notifications: enabled")
     asyncio.create_task(heartbeat_loop())
     # Telegram doesn't reliably push real-time updates for these channels to a
     # userbot session, so poll their history as the reliable delivery path.

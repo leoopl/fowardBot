@@ -176,6 +176,7 @@ All commands are sent as messages in your **control chat** (Saved Messages by de
 
 | Command   | Description                                                                                                                                                          |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/help`   | Show the full command reference in the control chat (`/start` is an alias).                                                                                          |
 | `/chatid` | Reply with the current chat's numeric id — handy for discovering a private channel/group id to put in `CONTROL_CHAT`. Works in **any** chat, and only your own (outgoing) messages trigger it, so nobody else can. |
 
 ### Examples
